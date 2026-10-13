@@ -121,6 +121,8 @@ class DetailedReport:
 
     def _hashable_context(self, input_context: List[str] | List[dict]):
         # Convert context to strings to ensure hashability (handle both strings and dicts from MCP)
+        if isinstance(input_context, str):
+            return [input_context]
         context_items = []
         
         for item in input_context:
@@ -163,6 +165,19 @@ class DetailedReport:
 
         subtopic_assistant.context = list(set(self._hashable_context(self.global_context)))
         await subtopic_assistant.conduct_research()
+        # The parent may already have visited every supplied URL. In that case
+        # the URL deduper correctly skips another fetch, but conduct_research()
+        # replaces the inherited context with an empty result. Re-rank the
+        # parent's *actual scraped pages* for this subtopic before writing.
+        if not subtopic_assistant.context:
+            cached_pages = [page for page in self.gpt_researcher.get_research_sources()
+                            if isinstance(page, dict) and str(page.get("raw_content") or "").strip()]
+            if not cached_pages:
+                raise RuntimeError(f"No scraped source content available for detailed subtopic: {current_subtopic_task}")
+            subtopic_assistant.context = await subtopic_assistant.context_manager.get_similar_content_by_query(
+                current_subtopic_task, cached_pages)
+            if not subtopic_assistant.context:
+                raise RuntimeError(f"Cached sources contain no relevant detailed subtopic content: {current_subtopic_task}")
 
         draft_section_titles = await subtopic_assistant.get_draft_section_titles(current_subtopic_task)
 
@@ -182,6 +197,8 @@ class DetailedReport:
             existing_headers=self.existing_headers,
             relevant_written_contents=relevant_contents,
         )
+        if not subtopic_report or subtopic_report.startswith("I could not gather any source material"):
+            raise RuntimeError(f"Detailed subtopic report has no source-supported body: {current_subtopic_task}")
 
         self.global_written_sections.extend(self.gpt_researcher.extract_sections(subtopic_report))
         self.global_context = list(set(self._hashable_context(subtopic_assistant.context)))
