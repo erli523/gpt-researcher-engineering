@@ -15,10 +15,15 @@ class LangChainDocumentLoader:
     async def load(self, metadata_source_index="title") -> List[Dict[str, str]]:
         docs = []
         for document in self.documents:
+            metadata = document.metadata or {}
+            # LangChain's standard provenance key is ``source``.  The legacy
+            # loader defaulted to ``title`` and silently erased provenance for
+            # ordinary Documents that only provide source metadata.
+            source = metadata.get(metadata_source_index) or metadata.get("source") or ""
             docs.append(
                 {
                     "raw_content": document.page_content,
-                    "url": document.metadata.get(metadata_source_index, ""),
+                    "url": source,
                 }
             )
         return docs
