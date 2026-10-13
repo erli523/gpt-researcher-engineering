@@ -29,6 +29,7 @@ const AccessReport: React.FC<AccessReportProps> = ({ accessData, chatBoxSettings
     // Clean the path - remove leading/trailing slashes and handle outputs/ prefix
     const cleanPath = path
       .trim()
+      .replace(/\\/g, '/')
       .replace(/^\/+|\/+$/g, ''); // Remove leading/trailing slashes
     
     // Only prepend outputs/ if it's not already there
