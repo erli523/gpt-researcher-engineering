@@ -72,7 +72,7 @@ class DocumentLoader:
             loader_dict = {
                 "pdf": PyMuPDFLoader(file_path),
 "epub": UnstructuredEPubLoader(file_path),
-                "txt": TextLoader(file_path),
+                "txt": TextLoader(file_path, encoding="utf-8-sig"),
                 "doc": UnstructuredWordDocumentLoader(file_path),
                 "docx": UnstructuredWordDocumentLoader(file_path),
                 "pptx": UnstructuredPowerPointLoader(file_path),
@@ -80,14 +80,37 @@ class DocumentLoader:
                 "xls": UnstructuredExcelLoader(file_path, mode="elements"),
                 "xlsx": UnstructuredExcelLoader(file_path, mode="elements"),
                 "md": UnstructuredMarkdownLoader(file_path),
-                "html": BSHTMLLoader(file_path),
-                "htm": BSHTMLLoader(file_path)
+                "html": BSHTMLLoader(file_path, open_encoding="utf-8-sig"),
+                "htm": BSHTMLLoader(file_path, open_encoding="utf-8-sig")
             }
 
             loader = loader_dict.get(file_extension, None)
             if loader:
                 try:
-                    ret_data = loader.load()
+                    try:
+                        ret_data = loader.load()
+                    except (UnicodeDecodeError, RuntimeError) as encoding_error:
+                        decode_error = encoding_error.__cause__ or encoding_error
+                        if (
+                            file_extension not in {"txt", "html", "htm"}
+                            or not isinstance(decode_error, UnicodeDecodeError)
+                        ):
+                            raise
+                        # Keep legacy encodings without relying on OS locale.
+                        from bs4 import UnicodeDammit
+
+                        with open(file_path, "rb") as source:
+                            encoding = UnicodeDammit(
+                                source.read(), is_html=file_extension != "txt"
+                            ).original_encoding
+                        if not encoding:
+                            raise
+                        fallback_loader = (
+                            TextLoader(file_path, encoding=encoding)
+                            if file_extension == "txt"
+                            else BSHTMLLoader(file_path, open_encoding=encoding)
+                        )
+                        ret_data = fallback_loader.load()
                 except Exception as e:
                     print(
                         f"Failed to load {file_extension or 'unknown'} document: {file_path}"
