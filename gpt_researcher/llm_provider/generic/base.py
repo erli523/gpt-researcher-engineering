@@ -115,6 +115,22 @@ class ChatLogger:
 
 class GenericLLMProvider:
 
+    @staticmethod
+    def _text_content(content: Any) -> str:
+        """Normalize provider text blocks without exposing reasoning/tool blocks."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                block if isinstance(block, str) else block["text"]
+                for block in content
+                if isinstance(block, str) or (
+                    isinstance(block, dict) and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                )
+            )
+        raise TypeError("LLM content must be text or a list of content blocks")
+
     def __init__(self, llm, chat_log: str | None = None,  verbose: bool = True):
         self.llm = llm
         self.chat_logger = ChatLogger(chat_log) if chat_log else None
@@ -365,7 +381,7 @@ class GenericLLMProvider:
             output = await self.llm.ainvoke(messages, **kwargs)
             self._capture_response_metadata(output)
 
-            res = output.content
+            res = self._text_content(output.content)
 
         else:
             res = await self.stream_response(messages, websocket, **kwargs)
@@ -383,7 +399,7 @@ class GenericLLMProvider:
         # Streaming the response using the chain astream method from langchain
         async for chunk in self.llm.astream(messages, **kwargs):
             self._capture_response_metadata(chunk)
-            content = chunk.content
+            content = self._text_content(chunk.content)
             if not content:
                 continue
             response += content
