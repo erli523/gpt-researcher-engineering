@@ -1,4 +1,6 @@
 from itertools import islice
+import re
+from urllib.parse import urlsplit
 from ..utils import check_pkg
 
 # gpt_researcher.skills.researcher._search_relevant_source_urls() treats
@@ -32,7 +34,20 @@ class Duckduckgo:
         from ddgs import DDGS
         self.ddg = DDGS()
         self.query = query
-        self.query_domains = query_domains or None
+        self.query_domains = [self._domain_name(domain) for domain in (query_domains or [])]
+
+    @staticmethod
+    def _domain_name(domain):
+        """Accept hostnames only, so a site clause cannot inject query syntax."""
+        name = str(domain).strip().lower().rstrip(".")
+        if not name or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*[a-z0-9]", name) or ".." in name:
+            raise ValueError(f"Invalid search domain: {domain!r}")
+        return name
+
+    @staticmethod
+    def _within_domains(url, domains):
+        host = (urlsplit(url).hostname or "").lower().rstrip(".")
+        return any(host == domain or host.endswith("." + domain) for domain in domains)
 
     def search(self, max_results=5):
         """
@@ -44,9 +59,11 @@ class Duckduckgo:
         Downstream research steps expect ``href`` and would KeyError or skip
         sources if the raw ddgs shape is returned unchanged.
         """
-        # TODO: Add support for query domains
         try:
-            search_response = self.ddg.text(self.query, region='wt-wt', max_results=max_results)
+            search_response = self.ddg.text(
+                self.query, region='wt-wt',
+                max_results=max_results * 3 if self.query_domains else max_results,
+            )
         except Exception as e:
             print(f"Error: {e}. Failed fetching sources. Resulting in empty response.")
             search_response = []
@@ -65,6 +82,8 @@ class Duckduckgo:
                 or ""
             )
             if not href:
+                continue
+            if self.query_domains and not self._within_domains(href, self.query_domains):
                 continue
             body = (
                 result.get("body")
