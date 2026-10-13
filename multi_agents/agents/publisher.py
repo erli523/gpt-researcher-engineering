@@ -72,7 +72,9 @@ class PublisherAgent:
 
     async def write_report_by_formats(self, layout:str, publish_formats: dict):
         if publish_formats.get("pdf"):
-            await write_md_to_pdf(layout, self.output_dir)
+            pdf_path = await write_md_to_pdf(layout, self.output_dir)
+            if not pdf_path:
+                raise RuntimeError("Requested PDF report could not be published")
         if publish_formats.get("docx"):
             await write_md_to_word(layout, self.output_dir)
         if publish_formats.get("markdown"):
