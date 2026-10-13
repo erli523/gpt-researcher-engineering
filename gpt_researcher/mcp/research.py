@@ -221,6 +221,15 @@ class MCPResearchSkill:
 
             # 2) If the result is already a list, process each item normally
             if isinstance(result, list):
+                # MCP adapters can return text content blocks without a wrapper.
+                # Reuse the wrapper path to preserve text rather than dict repr.
+                if result and all(
+                    isinstance(item, dict)
+                    and item.get("type") == "text"
+                    and isinstance(item.get("text"), str)
+                    for item in result
+                ):
+                    return self._process_tool_result(tool_name, {"content": result})
                 # If the result is already a list, process each item
                 for i, item in enumerate(result):
                     if isinstance(item, dict):
@@ -268,4 +277,4 @@ class MCPResearchSkill:
             }
             search_results.append(search_result)
         
-        return search_results 
+        return search_results
