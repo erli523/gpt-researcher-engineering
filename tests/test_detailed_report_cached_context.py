@@ -24,3 +24,16 @@ async def test_reuse_real_parent_pages_for_subtopic_when_urls_were_visited(monke
 def test_string_context_remains_one_context_item():
     detailed = DetailedReport(query="checkpoint review", report_type="detailed_report", report_source="web")
     assert detailed._hashable_context("documented checkpoint") == ["documented checkpoint"]
+
+
+@pytest.mark.asyncio
+async def test_detailed_subtopic_fails_when_parent_has_no_scraped_pages(monkeypatch):
+    detailed = DetailedReport(query="checkpoint review", report_type="detailed_report",
+                              report_source="web", source_urls=["https://example.org/source"])
+    detailed.global_context = ["Earlier context was not a scraped source page"]
+    async def no_new_pages(self):
+        self.context = ""
+        return ""
+    monkeypatch.setattr(GPTResearcher, "conduct_research", no_new_pages)
+    with pytest.raises(RuntimeError, match="No scraped source content"):
+        await detailed._get_subtopic_report({"task": "human review"})
