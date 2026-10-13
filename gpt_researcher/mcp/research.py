@@ -73,78 +73,77 @@ class MCPResearchSkill:
 
             # Create messages
             messages = [{"role": "user", "content": research_prompt}]
-            
-            # Invoke LLM with tools
-            logger.info("LLM researching with bound tools...")
-            response = await llm_with_tools.ainvoke(messages)
-            
-            # Process tool calls and results
             research_results = []
-            
-            # Check if the LLM made tool calls
-            if hasattr(response, 'tool_calls') and response.tool_calls:
-                logger.info(f"LLM made {len(response.tool_calls)} tool calls")
-                
-                # Process each tool call
-                for i, tool_call in enumerate(response.tool_calls, 1):
+            response = None
+            # Discovery tools (e.g. list_allowed_directories) may be needed before
+            # the file read. Feed actual results back so the model can take the next
+            # step; cap the loop to avoid runaway or repeated side effects.
+            from langchain_core.messages import ToolMessage
+            for round_number in range(1, 4):
+                logger.info("LLM researching with bound tools (round %s/3)...", round_number)
+                response = await llm_with_tools.ainvoke(messages)
+                tool_calls = getattr(response, "tool_calls", None) or []
+                if not tool_calls:
+                    break
+                logger.info("LLM made %s tool calls", len(tool_calls))
+                messages.append(response)
+                for i, tool_call in enumerate(tool_calls, 1):
                     tool_name = tool_call.get("name", "unknown")
                     tool_args = tool_call.get("args", {})
-                    
                     logger.info(f"Executing tool {i}/{len(response.tool_calls)}: {tool_name}")
-                    
-                    # Log the tool arguments for transparency
                     if tool_args:
                         args_str = ", ".join([f"{k}={v}" for k, v in tool_args.items()])
                         logger.debug(f"Tool arguments: {args_str}")
-                    
+                    tool_reply = ""
                     try:
-                        # Find the tool by name
                         tool = next((t for t in selected_tools if t.name == tool_name), None)
                         if not tool:
-                            logger.warning(f"Tool {tool_name} not found in selected tools")
-                            continue
-                        
-                        # Execute the tool
-                        if hasattr(tool, 'ainvoke'):
+                            tool_reply = f"Tool {tool_name} is unavailable"
+                            logger.warning(tool_reply)
+                        elif hasattr(tool, 'ainvoke'):
                             result = await tool.ainvoke(tool_args)
                         elif hasattr(tool, 'invoke'):
                             result = tool.invoke(tool_args)
                         else:
                             result = await tool(tool_args) if asyncio.iscoroutinefunction(tool) else tool(tool_args)
-                        
-                        # Log the actual tool response for debugging
-                        if result:
+                        if tool and result:
                             result_preview = str(result)[:500] + "..." if len(str(result)) > 500 else str(result)
                             logger.debug(f"Tool {tool_name} response preview: {result_preview}")
-                            
-                            # Process the result
                             formatted_results = self._process_tool_result(tool_name, result)
                             research_results.extend(formatted_results)
                             logger.info(f"Tool {tool_name} returned {len(formatted_results)} formatted results")
-                            
-                            # Log details of each formatted result
+                            tool_reply = "\n\n".join(str(row.get("body", "")) for row in formatted_results)
                             for j, formatted_result in enumerate(formatted_results):
                                 title = formatted_result.get("title", "No title")
                                 content_preview = formatted_result.get("body", "")[:200] + "..." if len(formatted_result.get("body", "")) > 200 else formatted_result.get("body", "")
                                 logger.debug(f"Result {j+1}: '{title}' - Content: {content_preview}")
-                        else:
+                        elif tool:
                             logger.warning(f"Tool {tool_name} returned empty result")
-                            
                     except Exception as e:
                         logger.error(f"Error executing tool {tool_name}: {e}")
-                        continue
-                        
-            # Also include the LLM's own analysis/response as a result
-            if hasattr(response, 'content') and response.content:
+                        tool_reply = f"Tool execution failed: {type(e).__name__}"
+                    # Always answer each tool call, including errors, to keep the
+                    # Anthropic tool-message exchange well formed.
+                    messages.append(ToolMessage(
+                        content=tool_reply[:12000] or "No content returned",
+                        tool_call_id=str(tool_call.get("id") or f"call_{round_number}_{i}"),
+                    ))
+            else:
+                logger.warning("MCP tool exchange reached the 3-round limit")
+
+            # Anthropic-compatible chat responses may carry typed content blocks.
+            # Preserve text only; a list body later breaks MCP context assembly.
+            analysis_text = GenericLLMProvider._text_content(response.content) if response and getattr(response, 'content', None) else ""
+            if analysis_text:
                 llm_analysis = {
                     "title": f"LLM Analysis: {query}",
                     "href": "mcp://llm_analysis",
-                    "body": response.content
+                    "body": analysis_text
                 }
                 research_results.append(llm_analysis)
                 
                 # Log LLM analysis content
-                analysis_preview = response.content[:300] + "..." if len(response.content) > 300 else response.content
+                analysis_preview = analysis_text[:300] + "..." if len(analysis_text) > 300 else analysis_text
                 logger.debug(f"LLM Analysis: {analysis_preview}")
                 logger.info("Added LLM analysis to results")
             
