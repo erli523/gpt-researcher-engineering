@@ -1,5 +1,7 @@
 <div align="center" id="top">
 
+> **中文工程实践说明：** 本分支的技术栈、核心思路、自主改动、验证结果和边界见 [PROJECT_OVERVIEW_CN.md](PROJECT_OVERVIEW_CN.md)。
+
 <img src="https://github.com/assafelovic/gpt-researcher/assets/13554167/20af8286-b386-44a5-9a83-3be1365139c3" alt="Logo" width="80">
 
 ####
